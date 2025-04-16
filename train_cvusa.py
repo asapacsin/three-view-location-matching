@@ -21,6 +21,7 @@ from model import two_view_net, three_view_net
 from random_erasing import RandomErasing
 from autoaugment import ImageNetPolicy
 import yaml
+from folder import ImageFolder
 from shutil import copyfile
 from utils import update_average, get_model_list, load_network, save_network, make_weights_for_balanced_classes
 
@@ -139,11 +140,15 @@ image_datasets['satellite'] = datasets.ImageFolder(os.path.join(data_dir, 'satel
                                           data_transforms['satellite'])
 image_datasets['street'] = datasets.ImageFolder(os.path.join(data_dir, 'street'),
                                           data_transforms['train'])
+image_datasets['drone'] = datasets.ImageFolder(os.path.join(data_dir, 'drone'),
+                                          data_transforms['train'])
+image_datasets['google'] = ImageFolder(os.path.join(data_dir, 'google'),
+                                          data_transforms['train'])
 
 dataloaders = {x: torch.utils.data.DataLoader(image_datasets[x], batch_size=opt.batchsize,
                                              shuffle=True, num_workers=2, pin_memory=True) # 8 workers may work faster
-              for x in ['satellite', 'street']}
-dataset_sizes = {x: len(image_datasets[x]) for x in ['satellite', 'street']}
+              for x in ['satellite', 'street','drone','google']}
+dataset_sizes = {x: len(image_datasets[x]) for x in ['satellite', 'street','drone','google']}
 class_names = image_datasets['street'].classes
 print(dataset_sizes)
 use_gpu = torch.cuda.is_available()
@@ -193,10 +198,12 @@ def train_model(model, model_test, criterion, optimizer, scheduler, num_epochs=2
             running_corrects2 = 0.0
             running_corrects3 = 0.0
             # Iterate over data.
-            for data,data2 in zip(dataloaders['satellite'], dataloaders['street']) :
+            for data,data2,data3,data4 in zip(dataloaders['satellite'], dataloaders['street'],dataloaders['drone'],dataloaders['google']) :
                 # get the inputs
                 inputs, labels = data
                 inputs2, labels2 = data2
+                inputs3, labels3 = data3
+                inputs4, labels4 = data4
                 now_batch_size,c,h,w = inputs.shape
                 if now_batch_size<opt.batchsize: # skip the last batch
                     continue
@@ -205,6 +212,10 @@ def train_model(model, model_test, criterion, optimizer, scheduler, num_epochs=2
                     inputs2 = Variable(inputs2.cuda().detach())
                     labels = Variable(labels.cuda().detach())
                     labels2 = Variable(labels2.cuda().detach())
+                    inputs3 = Variable(inputs.cuda().detach())
+                    inputs4 = Variable(inputs2.cuda().detach())
+                    labels3 = Variable(labels.cuda().detach())
+                    labels4 = Variable(labels2.cuda().detach())
                 else:
                     inputs, labels = Variable(inputs), Variable(labels)
  

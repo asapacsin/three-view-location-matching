@@ -17,8 +17,8 @@ opts = parser.parse_args()
 
 #gallery_name = 'gallery_satellite'
 #query_name = 'query_drone'
-gallery_name = 'gallery_drone'
-query_name = 'query_satellite'
+gallery_name = 'gallery_satellite'
+query_name = 'query_drone'
 
 data_dir = opts.test_dir
 image_datasets = {x: datasets.ImageFolder( os.path.join(data_dir,x) ) for x in [gallery_name, query_name]}

@@ -85,22 +85,22 @@ def load_network(name, opt):
     opt.fp16 = config['fp16']
     opt.views = config['views']
 
-    if opt.use_dense:
-        model = ft_net_dense(opt.nclasses, opt.droprate, opt.stride, None, opt.pool)
-    if opt.PCB:
-        model = PCB(opt.nclasses)
+    # if opt.use_dense:
+    #     model = ft_net_dense(opt.nclasses, opt.droprate, opt.stride, None, opt.pool)
+    # if opt.PCB:
+    #     model = PCB(opt.nclasses)
 
     if opt.views == 2:
         model = two_view_net(opt.nclasses, opt.droprate, stride = opt.stride, pool = opt.pool, share_weight = opt.share)
     elif opt.views == 3:
-        model = three_view_net(opt.nclasses, opt.droprate, stride = opt.stride, pool = opt.pool, share_weight = opt.share)
+        model = three_view_net(opt.nclasses, opt.droprate, stride = opt.stride, pool = opt.pool, share_weight = opt.share , nas=opt.use_NAS,swin=opt.use_swin)
 
-    if 'use_vgg16' in config:
-        opt.use_vgg16 = config['use_vgg16']
-        if opt.views == 2:
-            model = two_view_net(opt.nclasses, opt.droprate, stride = opt.stride, pool = opt.pool, share_weight = opt.share, VGG16 = opt.use_vgg16)
-        elif opt.views == 3:
-            model = three_view_net(opt.nclasses, opt.droprate, stride = opt.stride, pool = opt.pool, share_weight = opt.share, VGG16 = opt.use_vgg16)
+    # if 'use_vgg16' in config:
+    #     opt.use_vgg16 = config['use_vgg16']
+    #     if opt.views == 2:
+    #         model = two_view_net(opt.nclasses, opt.droprate, stride = opt.stride, pool = opt.pool, share_weight = opt.share, VGG16 = opt.use_vgg16)
+    #     elif opt.views == 3:
+    #         model = three_view_net(opt.nclasses, opt.droprate, stride = opt.stride, pool = opt.pool, share_weight = opt.share, VGG16 = opt.use_vgg16,nas=opt.use_NAS)
 
 
     # load model

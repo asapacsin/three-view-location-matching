@@ -89,6 +89,8 @@ class ClassBlock(nn.Module):
             return x
 
 
+
+
 class ft_net_VGG16(nn.Module):
 
     def __init__(self, class_num, droprate=0.5, stride=2, init_model=None, pool='avg'):
@@ -232,13 +234,81 @@ class two_view_net(nn.Module):
             y2 = self.classifier(x2)
         return y1, y2
 
+class ft_net_nas(nn.Module):
+    def __init__(self, class_num, droprate=0.5, stride=2, init_model=None, pool='avg'):
+        super(ft_net_nas, self).__init__()
+        model_ft = models.efficientnet_b0(pretrained=True)
+        
+        # Adjust stride in the initial conv_stem
+        if stride == 1:
+            model_ft.features[0][0].stride = (1, 1)  # Default is (2, 2)
+
+        self.pool = pool
+        if pool == 'avg+max':
+            model_ft.avgpool2 = nn.AdaptiveAvgPool2d((1, 1))
+            model_ft.maxpool2 = nn.AdaptiveMaxPool2d((1, 1))
+        elif pool == 'avg':
+            model_ft.avgpool2 = nn.AdaptiveAvgPool2d((1, 1))
+        elif pool == 'max':
+            model_ft.maxpool2 = nn.AdaptiveMaxPool2d((1, 1))
+        elif pool == 'gem':
+            model_ft.gem2 = GeM(dim=1280)  # EfficientNet-B0 outputs 1280 channels
+
+        self.model = model_ft
+        # Map EfficientNet’s 1280 channels to 2048 to match ft_net and ClassBlock
+        self.channel_mapper = nn.Linear(1280, 2048) if pool != 'avg+max' else nn.Linear(2560, 4096)
+        self.channel_mapper.apply(weights_init_kaiming)
+
+        if init_model is not None:
+            self.model = init_model.model
+            self.pool = init_model.pool
+
+    def forward(self, x):
+        # print(f"ft_net_nas input shape: {x.shape}")
+        
+        # EfficientNet features (conv_stem, MBConv blocks)
+        x = self.model.features(x)
+        # print(f"After features: {x.shape}")  # Expect (batch_size, 1280, h, w)
+
+        # Pooling
+        if self.pool == 'avg+max':
+            x1 = self.model.avgpool2(x)
+            x2 = self.model.maxpool2(x)
+            # print(f"avgpool2 shape: {x1.shape}, maxpool2 shape: {x2.shape}")
+            x = torch.cat((x1, x2), dim=1)
+            # print(f"After concat: {x.shape}")  # (batch_size, 2560, 1, 1)
+        elif self.pool == 'avg':
+            x = self.model.avgpool2(x)
+            # print(f"After avgpool2: {x.shape}")  # (batch_size, 1280, 1, 1)
+        elif self.pool == 'max':
+            x = self.model.maxpool2(x)
+            # print(f"After maxpool2: {x.shape}")  # (batch_size, 1280, 1, 1)
+        elif self.pool == 'gem':
+            x = self.model.gem2(x)
+            # print(f"After gem2: {x.shape}")  # (batch_size, 1280)
+
+        x = x.view(x.size(0), -1)
+        # print(f"After view: {x.shape}")  # (batch_size, 1280) or (batch_size, 2560) with avg+max
+        
+        # Map to 2048 (or 4096 for avg+max)
+        x = self.channel_mapper(x)
+        # print(f"After channel_mapper: {x.shape}")  # (batch_size, 2048) or (batch_size, 4096)
+        
+        # print(f"ft_net_nas output shape: {x.shape}")
+        return x
 
 class three_view_net(nn.Module):
-    def __init__(self, class_num, droprate, stride = 2, pool = 'avg', share_weight = False, VGG16=False, circle=False):
+    def __init__(self, class_num, droprate, stride = 2, pool = 'avg', share_weight = False, VGG16=False, circle=False,nas=False, swin=False):
         super(three_view_net, self).__init__()
         if VGG16:
             self.model_1 =  ft_net_VGG16(class_num, stride = stride, pool = pool)
             self.model_2 =  ft_net_VGG16(class_num, stride = stride, pool = pool)
+        elif nas:
+            self.model_1 =  ft_net_nas(class_num, stride = stride, pool = pool)
+            self.model_2 =  ft_net_nas(class_num, stride = stride, pool = pool)
+        elif swin:
+            self.model_1 =  ft_net_swin(class_num)
+            self.model_2 =  ft_net_swin(class_num)
         else:
             self.model_1 =  ft_net(class_num, stride = stride, pool = pool)
             self.model_2 =  ft_net(class_num, stride = stride, pool = pool)
@@ -248,6 +318,11 @@ class three_view_net(nn.Module):
         else:
             if VGG16:
                 self.model_3 =  ft_net_VGG16(class_num, stride = stride, pool = pool)
+            elif nas:
+                self.model_3 =  ft_net_nas(class_num, stride = stride, pool = pool)
+            elif swin:
+                self.model_1 =  ft_net_swin(class_num)
+                self.model_2 =  ft_net_swin(class_num)
             else:
                 self.model_3 =  ft_net(class_num, stride = stride, pool = pool)
 
@@ -288,7 +363,114 @@ class three_view_net(nn.Module):
             y4 = self.classifier(x4)
             return y1, y2, y3, y4
 
+class ft_net_LPN(nn.Module):
+    def __init__(self, num_classes=1000):
+        super(ft_net_LPN, self).__init__()
+        # Backbone: Simple CNN
+        self.conv1 = nn.Conv2d(3, 64, kernel_size=7, stride=2, padding=3)
+        self.relu = nn.ReLU(inplace=True)
+        self.pool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
+        self.conv2 = nn.Conv2d(64, 128, kernel_size=3, stride=1, padding=1)
+        
+        # Fully connected layer
+        self.fc = nn.Linear(128 * 56 * 56, num_classes)  # Adjust input size based on your data
+        
+    def forward(self, x):
+        x = self.conv1(x)
+        x = self.relu(x)
+        x = self.pool(x)
+        x = self.conv2(x)
+        x = self.relu(x)
+        x = x.view(x.size(0), -1)  # Flatten
+        x = self.fc(x)
+        return x
+        
+class ft_net_swin(nn.Module):
+    def __init__(self, num_classes=2048, pool='none'):
+        super(ft_net_swin, self).__init__()
+        self.backbone = models.swin_t(weights='IMAGENET1K_V1')
+        in_features = self.backbone.head.in_features  # 768 for Swin-Tiny
+        self.backbone.head = nn.Linear(in_features, 2048)  # Hardcode to 2048
+        self.pool = pool
+        if pool == 'gem':
+            self.gem_pool = GeM(dim=2048)  # Match output dimension
+    
+    def forward(self, x):
+        x = self.backbone(x)  # Shape: (batch_size, 2048)
+        if self.pool == 'gem':
+            x = x.view(x.size(0), x.size(1), 1, 1)  # Shape: (batch_size, 2048, 1, 1)
+            x = self.gem_pool(x)  # Shape: (batch_size, 2048)
+        return x
+    
+class GeM(nn.Module):
+    def __init__(self, dim, p=3, eps=1e-6):
+        super(GeM, self).__init__()
+        self.p = nn.Parameter(torch.ones(1) * p)
+        self.dim = dim
+        self.eps = eps
+    
+    def forward(self, x):
+        return self.gem(x, p=self.p, eps=self.eps)
+    
+    def gem(self, x, p=3, eps=1e-6):
+        x = x.clamp(min=eps).pow(p)
+        x = F.avg_pool2d(x, (x.size(-2), x.size(-1)))
+        x = x.view(x.size(0), x.size(1))
+        x = x.pow(1./p)
+        return x
+    
+class ft_net_dense(nn.Module):
+    def __init__(self, class_num, droprate=0.5, stride=2, init_model=None, pool='avg'):
+        super(ft_net_dense, self).__init__()
+        # Load pretrained DenseNet (using DenseNet121 as an example)
+        model_ft = models.densenet121(pretrained=True)
+        
+        # Modify stride if needed (DenseNet uses stride in initial conv and pooling layers)
+        if stride == 1:
+            model_ft.features.conv0.stride = (1, 1)  # Initial conv stride
+            model_ft.features.pool0 = nn.Identity()  # Remove initial maxpool
 
+        self.pool = pool
+        if pool == 'avg+max':
+            model_ft.avgpool2 = nn.AdaptiveAvgPool2d((1, 1))
+            model_ft.maxpool2 = nn.AdaptiveMaxPool2d((1, 1))
+        elif pool == 'avg':
+            model_ft.avgpool2 = nn.AdaptiveAvgPool2d((1, 1))
+        elif pool == 'max':
+            model_ft.maxpool2 = nn.AdaptiveMaxPool2d((1, 1))
+        elif pool == 'gem':
+            model_ft.gem2 = GeM(dim=1024)  # DenseNet121 output channels before classifier
+
+        # Remove the original classifier
+        model_ft.classifier = nn.Identity()
+        
+        self.model = model_ft
+
+        # If an initialized model is provided, override with its components
+        if init_model is not None:
+            self.model = init_model.model
+            self.pool = init_model.pool
+
+    def forward(self, x):
+        # Extract features from DenseNet
+        x = self.model.features(x)
+        
+        # Apply pooling based on the specified method
+        if self.pool == 'avg+max':
+            x1 = self.model.avgpool2(x)
+            x2 = self.model.maxpool2(x)
+            x = torch.cat((x1, x2), dim=1)
+        elif self.pool == 'avg':
+            x = self.model.avgpool2(x)
+        elif self.pool == 'max':
+            x = self.model.maxpool2(x)
+        elif self.pool == 'gem':
+            x = self.model.gem2(x)
+
+        # Flatten the output
+        x = x.view(x.size(0), x.size(1))
+        
+        return x
 '''
 # debug model structure
 # Run this code with:

@@ -8,7 +8,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.optim import lr_scheduler
+from  torch.optim import lr_scheduler
 from torch.autograd import Variable
 from torchvision import datasets, transforms
 from folder import ImageFolder
@@ -29,6 +29,7 @@ from shutil import copyfile
 from utils import update_average, get_model_list, load_network, save_network, make_weights_for_balanced_classes
 from pytorch_metric_learning import losses, miners  # pip install pytorch-metric-learning
 from circle_loss import CircleLoss, convert_label_to_similarity
+from torch.optim.lr_scheduler import StepLR
 
 version = torch.__version__
 # fp16
@@ -62,8 +63,9 @@ parser.add_argument('--share', action='store_true', help='share weight between d
 parser.add_argument('--droprate', default=0.5, type=float, help='drop rate')
 parser.add_argument('--pool', default='avg', type=str, help='pool avg')
 parser.add_argument('--stride', default=2, type=int, help='stride')
-parser.add_argument('--use_dense', action='store_true', help='use densenet121')
+parser.add_argument('--use_dense', action='store_true', help='use densenet')
 parser.add_argument('--use_NAS', action='store_true', help='use NAS')
+parser.add_argument('--use_swin', action='store_true', help='use swin')
 #optimizer
 parser.add_argument('--warm_epoch', default=0, type=int, help='the first K epoch that needs warm up')
 parser.add_argument('--lr', default=0.01, type=float, help='learning rate')
@@ -79,6 +81,8 @@ parser.add_argument('--triplet', action='store_true', help='use triplet loss')
 parser.add_argument('--lifted', action='store_true', help='use lifted loss')
 parser.add_argument('--sphere', action='store_true', help='use sphere loss')
 parser.add_argument('--loss_merge', action='store_true', help='combine perspectives to calculate losses')
+parser.add_argument('--use_vgg16', action='store_true', help='use VGG16' )
+
 opt = parser.parse_args()
 
 if opt.resume:
@@ -217,6 +221,9 @@ def train_model(model, model_test, criterion, optimizer, scheduler, num_epochs=2
     if opt.sphere:
         criterion_sphere = losses.SphereFaceLoss(num_classes=opt.nclasses, embedding_size=512, margin=4)
 
+
+    # Scheduler
+    scheduler = StepLR(optimizer, step_size=40, gamma=0.1)  # Reduce LR by 0.1 every 40 epochs
     for epoch in range(num_epochs - start_epoch):
         epoch = epoch + start_epoch
         print('Epoch {}/{}'.format(epoch, num_epochs - 1))
@@ -402,7 +409,7 @@ def train_model(model, model_test, criterion, optimizer, scheduler, num_epochs=2
                 running_corrects2 += float(torch.sum(preds2 == labels2.data))
                 if opt.views == 3:
                     running_corrects3 += float(torch.sum(preds3 == labels3.data))
-
+            scheduler.step()
             epoch_loss = running_loss / dataset_sizes['satellite']
             epoch_acc = running_corrects / dataset_sizes['satellite']
             epoch_acc2 = running_corrects2 / dataset_sizes['satellite']
@@ -474,10 +481,10 @@ return_feature = opt.arcface or opt.cosface or opt.circle or opt.triplet or opt.
 
 if opt.views == 2:
     model = two_view_net(len(class_names), droprate=opt.droprate, stride=opt.stride, pool=opt.pool,
-                         share_weight=opt.share, circle=return_feature)
+                         share_weight=opt.share, circle=return_feature,VGG16=opt.use_vgg16,nas=opt.use_NAS)
 elif opt.views == 3:
     model = three_view_net(len(class_names), droprate=opt.droprate, stride=opt.stride, pool=opt.pool,
-                           share_weight=opt.share, circle=return_feature)
+                           share_weight=opt.share, circle=return_feature,VGG16=opt.use_vgg16,nas=opt.use_NAS, swin=opt.use_swin)
 
 opt.nclasses = len(class_names)
 
