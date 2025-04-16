@@ -263,3 +263,4 @@ Instance loss is defined in
 - Person re-ID from Different Viewpoints [Code](https://github.com/layumi/Person_reID_baseline_pytorch)
 - Lending Orientation to Neural Networks for Cross-view Geo-localization [Code](https://github.com/Liumouliu/OriCNN)
 - Predicting Ground-Level Scene Layout from Aerial Imagery [Code](https://github.com/viibridges/crossnet)
+# three-view-location-matching
